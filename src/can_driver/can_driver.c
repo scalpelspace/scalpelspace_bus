@@ -1,7 +1,7 @@
 /*******************************************************************************
  * VENDORED FILE - DO NOT EDIT.
  * Source: https://github.com/scalpelspace/can_driver
- * Version: 72e4d5d (ref: v0.4.0)
+ * Version: 972bdec (ref: v0.5.0)
  * Synced by CI tooling.
  *******************************************************************************
  */
@@ -75,16 +75,19 @@ static uint32_t extract_raw32(const can_signal_t *signal, const uint8_t *data) {
 
 static double raw_to_physical(const uint32_t raw_value,
                               const can_signal_t *signal) {
-  const int32_t v = signal->is_signed
-                        ? sign_extend_u32(raw_value, signal->bit_length)
-                        : (int32_t)raw_value;
-  return (double)v * signal->scale + signal->offset;
+  if (signal->is_signed) {
+    return (double)sign_extend_u32(raw_value, signal->bit_length) *
+               signal->scale +
+           signal->offset;
+  }
+  // Unsigned: convert directly (a 32-bit raw value may exceed INT32_MAX).
+  return (double)raw_value * signal->scale + signal->offset;
 }
 
 /** Public functions. *********************************************************/
 
 uint32_t physical_to_raw(double physical_value, const can_signal_t *signal) {
-  if (signal->scale == 0.0) {
+  if (!signal || signal->bit_length == 0 || signal->scale == 0.0) {
     return 0;
   }
 
@@ -137,9 +140,9 @@ void pack_signal_raw32(const can_signal_t *signal, uint8_t *data,
 
 double decode_signal(const can_signal_t *signal, const uint8_t *data) {
   if (!signal || !data)
-    return 0.0f;
+    return 0.0;
   if (signal->bit_length == 0)
-    return 0.0f;
+    return 0.0;
 
   // Phys = raw * scale + offset.
   return raw_to_physical(extract_raw32(signal, data), signal);

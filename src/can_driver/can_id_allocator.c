@@ -1,7 +1,7 @@
 /*******************************************************************************
  * VENDORED FILE - DO NOT EDIT.
  * Source: https://github.com/scalpelspace/can_driver
- * Version: 72e4d5d (ref: v0.4.0)
+ * Version: 972bdec (ref: v0.5.0)
  * Synced by CI tooling.
  *******************************************************************************
  */
@@ -54,8 +54,9 @@ static uint16_t discovered_uids_2[CAN_ID_MAX_NODES] = {0};
 // Assigning Node ID value (awaiting ACK).
 static can_node_id_t assigning_node_ids[CAN_ID_MAX_NODES] = {0};
 
-// Assigned (ACKed) Node IDs, indexed by Node ID.
-static can_node_id_t assigned_node_ids[CAN_ID_MAX_NODES] = {0};
+// ACKed Node IDs, index-aligned with the discovered UID arrays.
+// 0 (CAN_ID_NODE_ID_UNASSIGNED) = node has not ACKed.
+static can_node_id_t acked_node_ids[CAN_ID_MAX_NODES] = {0};
 
 // UID table strategy state.
 static const can_id_uid_table_entry_t *uid_table_entries = NULL;
@@ -72,7 +73,7 @@ static uint8_t uid_table_count = 0;
  */
 static int16_t search_received_uids(const uint16_t uid_0, const uint16_t uid_1,
                                     const uint16_t uid_2) {
-  for (uint8_t i = 0; i < CAN_ID_MAX_NODES; i++) {
+  for (uint8_t i = 0; i < discovered_nodes; i++) {
     if ((discovered_uids_0[i] == uid_0) && (discovered_uids_1[i] == uid_1) &&
         (discovered_uids_2[i] == uid_2)) {
       return i;
@@ -97,11 +98,15 @@ static void node_id_strategy(void) {
 /** Public functions. *********************************************************/
 
 bool can_id_allocator_start(const allocator_config_t allocator) {
+  if (allocator.can_tx_func == NULL)
+    return false; // Transmit function is required to run the protocol.
+
   config = allocator; // Update configuration.
   allocator_state = ALLOCATOR_DISCOVER;
   discovered_nodes = 0;
   soft_assigned_nodes = 0;
   assignment_acked_nodes = 0;
+  memset(acked_node_ids, 0, sizeof(acked_node_ids));
   return true;
 }
 
@@ -139,6 +144,10 @@ void can_rx_can_id_allocator_advertise(const can_header_t *header,
 
   // Session must match.
   if (session_id != rx_session_id)
+    return;
+
+  // Ignore duplicate ADVERTISE (e.g. retransmission) from a known UID.
+  if (search_received_uids(rx_uid_0, rx_uid_1, rx_uid_2) >= 0)
     return;
 
   // Store UID.
@@ -196,8 +205,12 @@ void can_rx_can_id_allocator_ack(const can_header_t *header,
   if (uid_index < 0)
     return;
 
+  // Ignore duplicate ACK (e.g. retransmission) from an already ACKed node.
+  if (acked_node_ids[uid_index] != CAN_ID_NODE_ID_UNASSIGNED)
+    return;
+
   // Successful Node ID assignment confirmed.
-  assigned_node_ids[rx_node_id_in_data] = (uint8_t)uid_index;
+  acked_node_ids[uid_index] = rx_node_id_in_data;
   assignment_acked_nodes += 1;
 }
 
@@ -373,6 +386,10 @@ void can_id_allocator_state_machine(void) {
 
     // Transmit the assignment with each related UID.
     for (uint8_t i = 0; i < discovered_nodes; i++) {
+      // Skip nodes the strategy could not resolve (no free Node ID).
+      if (assigning_node_ids[i] == CAN_ID_NODE_ID_UNASSIGNED)
+        continue;
+
       // Pack signals and send.
       msg = allocation_dbc[CAN_ID_ALLOCATION_DBC_IDX_NODE_ID_ASSIGN];
       pack_signal_raw32(&msg.signals[0], tx_data, discovered_uids_0[i]);
@@ -400,10 +417,12 @@ void can_id_allocator_state_machine(void) {
       // State transition.
       allocator_state = ALLOCATOR_IDLE;
 
-      // Call assignment complete callback.
-      config.allocator_assigned_func(discovered_uids_0, discovered_uids_1,
-                                     discovered_uids_2, assigned_node_ids,
-                                     assignment_acked_nodes);
+      // Call assignment complete callback (optional).
+      if (config.allocator_assigned_func) {
+        config.allocator_assigned_func(discovered_uids_0, discovered_uids_1,
+                                       discovered_uids_2, acked_node_ids,
+                                       discovered_nodes);
+      }
     }
     break;
 

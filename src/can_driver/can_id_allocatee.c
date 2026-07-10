@@ -1,7 +1,7 @@
 /*******************************************************************************
  * VENDORED FILE - DO NOT EDIT.
  * Source: https://github.com/scalpelspace/can_driver
- * Version: 72e4d5d (ref: v0.4.0)
+ * Version: 972bdec (ref: v0.5.0)
  * Synced by CI tooling.
  *******************************************************************************
  */
@@ -46,6 +46,9 @@ static uint8_t node_id = 0;    // Assigned node ID.
 /** Public functions. *********************************************************/
 
 bool can_id_allocatee_start(const allocatee_config_t allocatee) {
+  if (allocatee.can_tx_func == NULL || allocatee.get_uid_hash48_func == NULL)
+    return false; // Transmit and UID functions are required for the protocol.
+
   config = allocatee; // Update configuration.
   node_id = 0;
   session_id = 0;
@@ -108,7 +111,13 @@ void can_rx_can_id_allocatee_assignment(const can_header_t *header,
   if (session_id != rx_session_id)
     return;
 
-  node_id = rx_node_id;                 // Assign new Node ID.
+  // Reject reserved Node IDs (0 = unassigned, 31 = broadcast) and any value
+  // outside the assignable range (1..30).
+  if (rx_node_id == CAN_ID_NODE_ID_UNASSIGNED ||
+      rx_node_id >= CAN_ID_NODE_ID_BROADCAST)
+    return;
+
+  node_id = (can_node_id_t)rx_node_id;  // Assign new Node ID.
   allocatee_state = ALLOCATEE_ASSIGNED; // Transition state.
 }
 
@@ -164,8 +173,13 @@ void can_id_allocatee_state_machine(void) {
     config.get_uid_hash48_func(&uid_0, &uid_1, &uid_2);
 
     // ACK CAN ID encodes the assigned node_id.
-    can_id_t ack_id;
-    can_id_pack(CAN_MSG_ENUM_ACK, node_id, &ack_id);
+    can_id_t ack_id = 0u;
+    if (!can_id_pack(CAN_MSG_ENUM_ACK, node_id, &ack_id)) {
+      // Unreachable: node_id was range-validated on assignment. Reset rather
+      // than transmit a malformed ACK.
+      allocatee_state = ALLOCATEE_IDLE;
+      break;
+    }
 
     // Pack signals and send.
     // Use ACK_00 as a signal-definition template, patch the new message ID.
@@ -182,8 +196,10 @@ void can_id_allocatee_state_machine(void) {
     // State transition.
     allocatee_state = ALLOCATEE_IDLE;
 
-    // Call assignment complete callback.
-    config.allocatee_assigned_func(node_id);
+    // Call assignment complete callback (optional).
+    if (config.allocatee_assigned_func) {
+      config.allocatee_assigned_func(node_id);
+    }
     break;
 
   default:

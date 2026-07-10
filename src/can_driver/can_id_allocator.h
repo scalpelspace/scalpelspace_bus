@@ -1,7 +1,7 @@
 /*******************************************************************************
  * VENDORED FILE - DO NOT EDIT.
  * Source: https://github.com/scalpelspace/can_driver
- * Version: 72e4d5d (ref: v0.4.0)
+ * Version: 972bdec (ref: v0.5.0)
  * Synced by CI tooling.
  *******************************************************************************
  */
@@ -19,7 +19,7 @@
 
 #include "can_driver.h"
 #include "can_id.h"
-#include "can_id_allocatee.h" // Included for can_tx_func_t type definition.
+#include "can_id_allocatee.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -28,11 +28,12 @@
 /**
  * @brief Define function pointer type for post allocatee node ID assignment.
  *
- * @param uids_0
- * @param uids_1
- * @param uids_2
- * @param node_ids
- * @param node_count
+ * @param uids_0 Array of UID bits  0..15, indexed by discovery order.
+ * @param uids_1 Array of UID bits 16..31, indexed by discovery order.
+ * @param uids_2 Array of UID bits 32..47, indexed by discovery order.
+ * @param node_ids ACKed Node IDs, index-aligned with the uid arrays.
+ *                 0 (CAN_ID_NODE_ID_UNASSIGNED) = node did not ACK.
+ * @param node_count Number of discovered nodes (valid length of the arrays).
  */
 typedef void (*allocator_assigned_func_t)(
     uint16_t uids_0[CAN_ID_MAX_NODES], uint16_t uids_1[CAN_ID_MAX_NODES],
@@ -65,10 +66,12 @@ typedef void (*node_id_assignment_strategy_t)(
     can_node_id_t node_ids_out[CAN_ID_MAX_NODES]);
 
 typedef struct allocator_config {
-  can_tx_func_t can_tx_func; // CAN message transmit function pointer.
+  can_tx_func_t can_tx_func; // CAN message transmit function pointer. Required.
   allocator_assigned_func_t
-      allocator_assigned_func;            // Allocation success callback.
+      allocator_assigned_func; // Allocation success callback. Optional (NULL to
+                               // skip).
   node_id_assignment_strategy_t strategy; // Node ID assignment strategy.
+                                          // Optional (NULL for FIFO).
 } allocator_config_t;
 
 /** Public functions. *********************************************************/
@@ -101,7 +104,9 @@ void can_rx_can_id_allocator_ack(const can_header_t *header,
  *
  * @param allocator
  *
- * @return Always true.
+ * @return Success status.
+ * @retval true -> Allocator started.
+ * @retval false -> Invalid configuration (can_tx_func is NULL).
  */
 bool can_id_allocator_start(allocator_config_t allocator);
 
@@ -144,10 +149,10 @@ void can_id_strategy_uid_ascending(
  * @brief UID table strategy: assign a fixed Node ID to each known UID.
  *
  * Nodes whose UID appears in the table receive the mapped Node ID. Nodes
- * not present in the table are assigned Node IDs sequentially starting
- * from the first free slot above the highest table-mapped ID. This
- * ensures unknown nodes still receive a valid (if arbitrary) assignment
- * rather than being skipped entirely.
+ * not present in the table are assigned the lowest free (unclaimed) Node
+ * IDs sequentially. This ensures unknown nodes still receive a valid (if
+ * arbitrary) assignment rather than being skipped entirely, unless no free
+ * Node IDs remain (unresolved nodes are left at 0 and skipped).
  *
  * Must be configured via @ref can_id_strategy_uid_table_set before use.
  */

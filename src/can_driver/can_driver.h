@@ -1,7 +1,7 @@
 /*******************************************************************************
  * VENDORED FILE - DO NOT EDIT.
  * Source: https://github.com/scalpelspace/can_driver
- * Version: 72e4d5d (ref: v0.4.0)
+ * Version: 972bdec (ref: v0.5.0)
  * Synced by CI tooling.
  *******************************************************************************
  */
@@ -12,8 +12,8 @@
  *******************************************************************************
  */
 
-#ifndef __CAN_DRIVER_H
-#define __CAN_DRIVER_H
+#ifndef CAN_DRIVER__CAN_DRIVER_H
+#define CAN_DRIVER__CAN_DRIVER_H
 
 /** Includes. *****************************************************************/
 

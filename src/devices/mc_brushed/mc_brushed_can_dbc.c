@@ -1,7 +1,7 @@
 /*******************************************************************************
  * VENDORED FILE - DO NOT EDIT.
  * Source: https://github.com/scalpelspace/mc_brushed_driver
- * Version: 0d4eb85 (ref: HEAD)
+ * Version: c31323e (ref: v0.1.0)
  * Synced by CI tooling.
  *******************************************************************************
  */
