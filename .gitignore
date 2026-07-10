@@ -6,7 +6,7 @@
 
 # JetBrains IDEs
 # Based on: https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore.
-../scalpelspace_bus/.idea/
+.idea/
 
 ################################################################################
 # macos.gitignore
