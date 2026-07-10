@@ -1,0 +1,109 @@
+#######################################
+# Syntax coloring map for ScalpelSpace Bus
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+ScalpelBus	KEYWORD1
+ScalpelBusDevice	KEYWORD1
+ScalpelBusNode	KEYWORD1
+ScalpelBusStatus	KEYWORD1
+ScalpelVersionInfo	KEYWORD1
+ScalpelBusNodeIdEntry	KEYWORD1
+ScalpelDateTime	KEYWORD1
+ScalpelCanFrame	KEYWORD1
+ScalpelCanTransport	KEYWORD1
+Mcp2518fdTransport	KEYWORD1
+McStepper	KEYWORD1
+McBrushed	KEYWORD1
+MomentumCan	KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+begin	KEYWORD2
+rediscover	KEYWORD2
+useFifoAllocation	KEYWORD2
+useUidAscendingAllocation	KEYWORD2
+useUidTableAllocation	KEYWORD2
+poll	KEYWORD2
+status	KEYWORD2
+nodeCount	KEYWORD2
+nodeInfo	KEYWORD2
+probeVersion	KEYWORD2
+sendFrame	KEYWORD2
+onUnhandledFrame	KEYWORD2
+attach	KEYWORD2
+attached	KEYWORD2
+detach	KEYWORD2
+nodeId	KEYWORD2
+moveTo	KEYWORD2
+moveBy	KEYWORD2
+setVelocity	KEYWORD2
+moveOpenLoop	KEYWORD2
+setTorque	KEYWORD2
+setDuty	KEYWORD2
+setEnabled	KEYWORD2
+clearFaults	KEYWORD2
+command	KEYWORD2
+zero	KEYWORD2
+setMotionConfig	KEYWORD2
+requestMotionConfig	KEYWORD2
+setCurrentConfig	KEYWORD2
+requestCurrentConfig	KEYWORD2
+setPid	KEYWORD2
+requestPid	KEYWORD2
+setStallguard	KEYWORD2
+requestStallguard	KEYWORD2
+setDateTime	KEYWORD2
+requestDateTime	KEYWORD2
+requestGnssUtc	KEYWORD2
+setRgbLed	KEYWORD2
+requestVersion	KEYWORD2
+state	KEYWORD2
+sensor	KEYWORD2
+stallguardEvent	KEYWORD2
+controlsDiagnostic	KEYWORD2
+motionConfig	KEYWORD2
+currentConfig	KEYWORD2
+pidConfig	KEYWORD2
+stallguardConfig	KEYWORD2
+dateTime	KEYWORD2
+version	KEYWORD2
+barometric	KEYWORD2
+gnssPosition	KEYWORD2
+gnssKinematics	KEYWORD2
+gnssAltitude	KEYWORD2
+quaternion	KEYWORD2
+gyroscope	KEYWORD2
+magnetometer	KEYWORD2
+accelerometer	KEYWORD2
+linearAcceleration	KEYWORD2
+gravity	KEYWORD2
+gnssUtc	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+
+SCALPEL_BUS_OSC_4MHZ	LITERAL1
+SCALPEL_BUS_OSC_20MHZ	LITERAL1
+SCALPEL_BUS_OSC_40MHZ	LITERAL1
+SCALPEL_BUS_IDLE	LITERAL1
+SCALPEL_BUS_OK	LITERAL1
+SCALPEL_BUS_ERR_TRANSPORT	LITERAL1
+SCALPEL_BUS_ERR_ACK_TIMEOUT	LITERAL1
+MC_STEPPER_MODE_POSITION_ABS	LITERAL1
+MC_STEPPER_MODE_VELOCITY	LITERAL1
+MC_STEPPER_MODE_POSITION_REL	LITERAL1
+MC_STEPPER_MODE_POSITION_OL	LITERAL1
+MC_BRUSHED_MODE_TORQUE	LITERAL1
+MC_BRUSHED_MODE_VELOCITY	LITERAL1
+MC_BRUSHED_MODE_POSITION_REL	LITERAL1
+MC_BRUSHED_MODE_HBRIDGE_OL	LITERAL1
+MC_BRUSHED_PID_TORQUE	LITERAL1
+MC_BRUSHED_PID_VELOCITY	LITERAL1
+MC_BRUSHED_PID_POSITION	LITERAL1
