@@ -206,6 +206,9 @@ src/
 Device layers are independent: handles you never instantiate are discarded by
 linker garbage collection, so unused devices cost near-zero flash.
 
+The vendored sources (`src/can_driver/` and the `*_can_dbc.*` files under
+`src/devices/`) are copies from their upstream repos, refreshed internal CI.
+
 ### 5.2 Custom Transports
 
 The protocol stack talks to the wire through the `ScalpelCanTransport`
