@@ -228,20 +228,37 @@ void ScalpelBus::handleAllocationFrame(const can_message_id_t messageId,
   switch (messageId) {
   case (can_message_id_t)CAN_MSG_ENUM_ADVERTISE: {
     can_rx_can_id_allocator_advertise(&header, frame.data);
-    // Shadow record of the advertised UID so nodes can be inspected even
-    // if allocation later stalls; overwritten by the authoritative
-    // completion callback on success. Mirrors the allocator's accept
-    // window (advertises after discovery closes are ignored there too).
+    // Shadow record of the advertised UID so nodes can be inspected even if
+    // allocation later stalls; overwritten by the authoritative completion
+    // callback on success. Mirrors the allocator's accept window (advertises
+    // after discovery closes are ignored there too) and its duplicate ADVERTISE
+    // rejection.
     if (_discoveryOpen && frame.dlc == 8 && _nodeCount < CAN_ID_MAX_NODES) {
-      ScalpelBusNode &node = _nodes[_nodeCount];
-      node.uid[0] = (uint16_t)(frame.data[0] | ((uint16_t)frame.data[1] << 8));
-      node.uid[1] = (uint16_t)(frame.data[2] | ((uint16_t)frame.data[3] << 8));
-      node.uid[2] = (uint16_t)(frame.data[4] | ((uint16_t)frame.data[5] << 8));
-      // Node ID is provisional until computeNodeIdsFromStrategy() runs
-      // when the discovery window closes.
-      node.nodeId = CAN_ID_NODE_ID_UNASSIGNED;
-      node.acked = false;
-      _nodeCount++;
+      const uint16_t uid0 =
+          (uint16_t)(frame.data[0] | ((uint16_t)frame.data[1] << 8));
+      const uint16_t uid1 =
+          (uint16_t)(frame.data[2] | ((uint16_t)frame.data[3] << 8));
+      const uint16_t uid2 =
+          (uint16_t)(frame.data[4] | ((uint16_t)frame.data[5] << 8));
+      bool duplicate = false;
+      for (uint8_t i = 0; i < _nodeCount; i++) {
+        if (_nodes[i].uid[0] == uid0 && _nodes[i].uid[1] == uid1 &&
+            _nodes[i].uid[2] == uid2) {
+          duplicate = true;
+          break;
+        }
+      }
+      if (!duplicate) {
+        ScalpelBusNode &node = _nodes[_nodeCount];
+        node.uid[0] = uid0;
+        node.uid[1] = uid1;
+        node.uid[2] = uid2;
+        // Node ID is provisional until computeNodeIdsFromStrategy() runs when
+        // the discovery window closes.
+        node.nodeId = CAN_ID_NODE_ID_UNASSIGNED;
+        node.acked = false;
+        _nodeCount++;
+      }
     }
     break;
   }
@@ -269,16 +286,19 @@ void ScalpelBus::handleAllocationFrame(const can_message_id_t messageId,
 void ScalpelBus::onAllocationAssigned(const uint16_t *uids0,
                                       const uint16_t *uids1,
                                       const uint16_t *uids2,
+                                      const can_node_id_t *nodeIds,
                                       const uint8_t nodeCount) {
-  // Authoritative result: UID arrays are indexed by discovery order.
+  // Authoritative result: all arrays are indexed by discovery order and nodeIds
+  // carries the ACKed node ID per entry (0 = not assigned, e.g. the strategy
+  // ran out of free node IDs).
   _nodeCount = (nodeCount <= CAN_ID_MAX_NODES) ? nodeCount : CAN_ID_MAX_NODES;
   for (uint8_t i = 0; i < _nodeCount; i++) {
     _nodes[i].uid[0] = uids0[i];
     _nodes[i].uid[1] = uids1[i];
     _nodes[i].uid[2] = uids2[i];
-    _nodes[i].acked = true;
+    _nodes[i].nodeId = nodeIds[i];
+    _nodes[i].acked = nodeIds[i] != CAN_ID_NODE_ID_UNASSIGNED;
   }
-  computeNodeIdsFromStrategy();
   _allocationComplete = true;
 }
 
@@ -359,11 +379,8 @@ void ScalpelBus::allocatorAssignedTrampoline(
     uint16_t uids0[CAN_ID_MAX_NODES], uint16_t uids1[CAN_ID_MAX_NODES],
     uint16_t uids2[CAN_ID_MAX_NODES], can_node_id_t nodeIds[CAN_ID_MAX_NODES],
     can_node_id_t nodeCount) {
-  // nodeIds is indexed by node ID with an ambiguous 0 default, so node IDs
-  // are instead recomputed from the configured strategy (deterministic on
-  // the same UID set) inside onAllocationAssigned().
-  (void)nodeIds;
   if (s_activeInstance != NULL) {
-    s_activeInstance->onAllocationAssigned(uids0, uids1, uids2, nodeCount);
+    s_activeInstance->onAllocationAssigned(uids0, uids1, uids2, nodeIds,
+                                           nodeCount);
   }
 }

@@ -153,11 +153,11 @@ ScalpelSpace device firmware does.
 
 Select before `begin()`:
 
-| Strategy       | Method                                    | Behaviour                                                                                          |
-|----------------|-------------------------------------------|----------------------------------------------------------------------------------------------------|
-| FIFO (default) | `bus.useFifoAllocation()`                 | Node IDs 1..N in advertise-arrival order. Simple, but not deterministic across power cycles.       |
-| UID ascending  | `bus.useUidAscendingAllocation()`         | Node IDs 1..N in ascending UID order. Deterministic for a fixed set of hardware.                   |
-| UID table      | `bus.useUidTableAllocation(table, count)` | Each known UID gets a fixed node ID; unknown devices fall back to free IDs above the mapped range. |
+| Strategy       | Method                                    | Behaviour                                                                                    |
+|----------------|-------------------------------------------|----------------------------------------------------------------------------------------------|
+| FIFO (default) | `bus.useFifoAllocation()`                 | Node IDs 1..N in advertise-arrival order. Simple, but not deterministic across power cycles. |
+| UID ascending  | `bus.useUidAscendingAllocation()`         | Node IDs 1..N in ascending UID order. Deterministic for a fixed set of hardware.             |
+| UID table      | `bus.useUidTableAllocation(table, count)` | Each known UID gets a fixed node ID; unknown devices fall back to the lowest free node IDs.  |
 
 The **UID table** is the recommended pattern whenever a sketch addresses a
 device by node ID (all motor control use cases):

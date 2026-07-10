@@ -129,9 +129,10 @@ public:
    * @brief Assign a fixed node ID to each known UID (recommended when the
    * sketch addresses devices by node ID).
    *
-   * Devices found in @p entries receive their mapped node ID; unknown
-   * devices still get a free node ID above the highest mapped one. The
-   * array is used by reference and must stay alive while the bus is in use.
+   * Devices found in @p entries receive their mapped node ID; unknown devices
+   * receive the lowest free (unclaimed) node IDs, or stay unassigned (node ID
+   * 0) if none remain. The array is used by reference and must stay alive while
+   * the bus is in use.
    *
    * @param entries UID -> node ID mappings (node IDs 1..30, unique).
    * @param count Number of entries.
@@ -196,7 +197,8 @@ private:
   void handleAllocationFrame(can_message_id_t messageId,
                              const ScalpelCanFrame &frame);
   void onAllocationAssigned(const uint16_t *uids0, const uint16_t *uids1,
-                            const uint16_t *uids2, uint8_t nodeCount);
+                            const uint16_t *uids2,
+                            const can_node_id_t *nodeIds, uint8_t nodeCount);
 
   // Trampolines into the single active instance; the can_driver allocator
   // takes plain function pointers without a context argument.
