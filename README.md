@@ -1,8 +1,7 @@
 # scalpelspace_bus
 
 Unified Arduino library for controlling ScalpelSpace CAN devices via the
-[ScalpelSpace SPI-CAN breakout](https://shop.scalpelspace.com/products/spi-can-breakout)
-(MCP2518FD).
+ScalpelSpace SPI-CAN breakout (MCP2518FD).
 
 ---
 
