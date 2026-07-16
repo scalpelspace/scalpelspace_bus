@@ -1,7 +1,7 @@
 /*******************************************************************************
  * VENDORED FILE - DO NOT EDIT.
  * Source: https://github.com/scalpelspace/mc_brushed_driver
- * Version: c31323e (ref: v0.1.0)
+ * Version: 6df2fa6 (ref: v0.1.1)
  * Synced by CI tooling.
  *******************************************************************************
  */
@@ -666,6 +666,132 @@ static const can_signal_t controls_config_response_signals[12] = {
     },
 };
 
+static const can_signal_t encoder_config_set_signals[4] = {
+    {
+        .name = "node_id",
+        .start_bit = 0,
+        .bit_length = 8,
+        .byte_order = CAN_LITTLE_ENDIAN,
+        .is_signed = false,
+        .scale = 1.0f,
+        .offset = 0.0f,
+        .min_value = 0.0f,
+        .max_value = 255.0f,
+        .mux_role = CAN_MUX_NONE,
+        .mux_value = 0,
+    },
+    {
+        .name = "reserved0",
+        .start_bit = 8,
+        .bit_length = 3,
+        .byte_order = CAN_LITTLE_ENDIAN,
+        .is_signed = false,
+        .scale = 1.0f,
+        .offset = 0.0f,
+        .min_value = 0.0f,
+        .max_value = 7.0f,
+        .mux_role = CAN_MUX_NONE,
+        .mux_value = 0,
+    },
+    {
+        .name = "reserved1",
+        .start_bit = 11,
+        .bit_length = 5,
+        .byte_order = CAN_LITTLE_ENDIAN,
+        .is_signed = false,
+        .scale = 1.0f,
+        .offset = 0.0f,
+        .min_value = 0.0f,
+        .max_value = 31.0f,
+        .mux_role = CAN_MUX_NONE,
+        .mux_value = 0,
+    },
+    {
+        .name = "quadrature_count",
+        .start_bit = 16,
+        .bit_length = 16,
+        .byte_order = CAN_LITTLE_ENDIAN,
+        .is_signed = false,
+        .scale = 1.0f,
+        .offset = 0.0f,
+        .min_value = 0.0f,
+        .max_value = 65535.0f,
+        .mux_role = CAN_MUX_NONE,
+        .mux_value = 0,
+    },
+};
+
+static const can_signal_t encoder_config_get_signals[1] = {
+    {
+        .name = "node_id",
+        .start_bit = 0,
+        .bit_length = 8,
+        .byte_order = CAN_LITTLE_ENDIAN,
+        .is_signed = false,
+        .scale = 1.0f,
+        .offset = 0.0f,
+        .min_value = 0.0f,
+        .max_value = 255.0f,
+        .mux_role = CAN_MUX_NONE,
+        .mux_value = 0,
+    },
+};
+
+static const can_signal_t encoder_config_response_signals[4] = {
+    {
+        .name = "reserved0",
+        .start_bit = 0,
+        .bit_length = 8,
+        .byte_order = CAN_LITTLE_ENDIAN,
+        .is_signed = false,
+        .scale = 1.0f,
+        .offset = 0.0f,
+        .min_value = 0.0f,
+        .max_value = 255.0f,
+        .mux_role = CAN_MUX_NONE,
+        .mux_value = 0,
+    },
+    {
+        .name = "mode",
+        .start_bit = 8,
+        .bit_length = 3,
+        .byte_order = CAN_LITTLE_ENDIAN,
+        .is_signed = false,
+        .scale = 1.0f,
+        .offset = 0.0f,
+        .min_value = 0.0f,
+        .max_value = 7.0f,
+        .mux_role = CAN_MUX_NONE,
+        .mux_value = 0,
+    },
+    {
+        .name = "reserved1",
+        .start_bit = 11,
+        .bit_length = 5,
+        .byte_order = CAN_LITTLE_ENDIAN,
+        .is_signed = false,
+        .scale = 1.0f,
+        .offset = 0.0f,
+        .min_value = 0.0f,
+        .max_value = 31.0f,
+        .mux_role = CAN_MUX_NONE,
+        .mux_value = 0,
+    },
+    {
+        .name = "quadrature_count",
+        .start_bit = 16,
+        .bit_length = 16,
+        .byte_order = CAN_LITTLE_ENDIAN,
+        .is_signed = false,
+        .scale = 1.0f,
+        .offset = 0.0f,
+        .min_value = 0.0f,
+        .max_value = 65535.0f,
+        .mux_role = CAN_MUX_NONE,
+        .mux_value = 0,
+    },
+};
+
 static const can_signal_t datetime_set_signals[7] = {
     {
         .name = "year",
@@ -1035,8 +1161,38 @@ const can_message_t mc_brushed_dbc_messages[] = {
         .signal_count = 12,
     },
     {
-        .name = "datetime_set",
+        .name = "encoder_config_set",
         .message_id = 288,
+        .id_mask = 0xFFFFFFFF,
+        .dlc = 4,
+        .rx_handler = 0, // (can_rx_handler_t)my_rx_handler_func,
+        .tx_handler = 0, // (can_tx_handler_t)my_tx_handler_func,
+        .signals = encoder_config_set_signals,
+        .signal_count = 4,
+    },
+    {
+        .name = "encoder_config_get",
+        .message_id = 320,
+        .id_mask = 0xFFFFFFFF,
+        .dlc = 1,
+        .rx_handler = 0, // (can_rx_handler_t)my_rx_handler_func,
+        .tx_handler = 0, // (can_tx_handler_t)my_tx_handler_func,
+        .signals = encoder_config_get_signals,
+        .signal_count = 1,
+    },
+    {
+        .name = "encoder_config_response",
+        .message_id = 352,
+        .id_mask = 0xFFFFFFFF,
+        .dlc = 4,
+        .rx_handler = 0, // (can_rx_handler_t)my_rx_handler_func,
+        .tx_handler = 0, // (can_tx_handler_t)my_tx_handler_func,
+        .signals = encoder_config_response_signals,
+        .signal_count = 4,
+    },
+    {
+        .name = "datetime_set",
+        .message_id = 384,
         .id_mask = 0xFFFFFFFF,
         .dlc = 7,
         .rx_handler = 0, // (can_rx_handler_t)my_rx_handler_func,
@@ -1046,7 +1202,7 @@ const can_message_t mc_brushed_dbc_messages[] = {
     },
     {
         .name = "datetime_get",
-        .message_id = 320,
+        .message_id = 416,
         .id_mask = 0xFFFFFFFF,
         .dlc = 0,
         .rx_handler = 0, // (can_rx_handler_t)my_rx_handler_func,
@@ -1056,7 +1212,7 @@ const can_message_t mc_brushed_dbc_messages[] = {
     },
     {
         .name = "datetime_get_response",
-        .message_id = 352,
+        .message_id = 448,
         .id_mask = 0xFFFFFFFF,
         .dlc = 7,
         .rx_handler = 0, // (can_rx_handler_t)my_rx_handler_func,
@@ -1066,7 +1222,7 @@ const can_message_t mc_brushed_dbc_messages[] = {
     },
     {
         .name = "rgb_led_set",
-        .message_id = 384,
+        .message_id = 480,
         .id_mask = 0xFFFFFFFF,
         .dlc = 3,
         .rx_handler = 0, // (can_rx_handler_t)my_rx_handler_func,
