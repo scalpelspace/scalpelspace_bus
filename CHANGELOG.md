@@ -9,6 +9,7 @@
 * [Changelog](#changelog)
   * [v0.1.0 (2026-07-14)](#v010--2026-07-14-)
   * [v0.1.1 (2026-07-15)](#v011--2026-07-15-)
+  * [v0.1.2 (TBD)](#v012--tbd-)
 <!-- TOC -->
 
 </details>
@@ -24,3 +25,9 @@
 ## [v0.1.1 (2026-07-15)](https://github.com/scalpelspace/scalpelspace_bus/releases/tag/v0.1.1)
 
 - Update `mc_brushed_driver` vendor files for v0.1.1 release.
+
+---
+
+## [v0.1.2 (TBD)](https://github.com/scalpelspace/scalpelspace_bus/releases/tag/v0.1.2)
+
+- Fix minor docs formatting and styling issues in `README.md`.

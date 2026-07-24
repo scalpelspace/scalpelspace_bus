@@ -16,7 +16,7 @@ ScalpelSpace SPI-CAN breakout (MCP2518FD).
   * [4 Node ID Allocation and Device Binding](#4-node-id-allocation-and-device-binding)
     * [4.1 Allocator Role](#41-allocator-role)
     * [4.2 Assignment Strategies](#42-assignment-strategies)
-    * [5.3 Mixed-Device Buses](#53-mixed-device-buses)
+    * [4.3 Mixed-Device Buses](#43-mixed-device-buses)
   * [5 Library Architecture](#5-library-architecture)
     * [5.2 Custom Transports](#52-custom-transports)
   * [6 Limitations](#6-limitations)
@@ -177,7 +177,7 @@ imu.attach(2);
 Run the `uid_scan` example once to read the UIDs of the devices on your bus; it
 prints ready-to-paste table entries.
 
-### 5.3 Mixed-Device Buses
+### 4.3 Mixed-Device Buses
 
 Positional binding is deterministic only when the binding order cannot be
 confused (single device, or all devices the same product). With different
