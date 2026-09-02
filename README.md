@@ -114,6 +114,14 @@ Devices must be powered and listening before `begin()` runs; call
 with `bus.nodeCount()`, `bus.nodeInfo()` and `bus.probeVersion()` (see the
 `uid_scan` example).
 
+Every node answers `DISCOVER`, including one that already holds a node ID, and
+its advertisement carries the node ID it currently holds. A device whose
+firmware is configured with a **fixed (hardcoded) node ID** keeps it: the
+allocator takes that node ID out of the pool offered to the strategy, never
+sends the device an assignment, and the device never `ACK`s. Such nodes are
+reported by `bus.nodeInfo()` with `ScalpelBusNode::reserved` set and
+`ScalpelBusNode::acked` clear, with `nodeId` holding the ID they advertised.
+
 Each allocation run carries an incrementing session ID so frames from an older
 session are discarded. The upstream counter restarts at 0 on MCU reset, so the
 library additionally randomizes the starting session once per boot; without
@@ -135,10 +143,10 @@ assumes it owns the bus's node ID space:
 Connecting a second allocator to a live bus fails subtly rather than loudly:
 devices that already hold node IDs ignore the new discovery, so the bus looks
 undisturbed -- but any device that missed the original owner's discovery window
-will answer the intruder and take an ID from the second owner's numbering,
-which can collide with an ID the original owner already assigned. Two devices
-then transmit under the same CAN IDs. Concurrent discovery windows from two
-owners also corrupt each other's allocation sessions.
+will answer the intruder and take an ID from the second owner's numbering, which
+can collide with an ID the original owner already assigned. Two devices then
+transmit under the same CAN IDs. Concurrent discovery windows from two owners
+also corrupt each other's allocation sessions.
 
 The **allocatee (device/node) role is intentionally not provided** and must be
 custom implemented. An allocatee is conceptually a device on someone else's bus,
@@ -152,11 +160,16 @@ ScalpelSpace device firmware does.
 
 Select before `begin()`:
 
-| Strategy       | Method                                    | Behaviour                                                                                    |
-|----------------|-------------------------------------------|----------------------------------------------------------------------------------------------|
-| FIFO (default) | `bus.useFifoAllocation()`                 | Node IDs 1..N in advertise-arrival order. Simple, but not deterministic across power cycles. |
-| UID ascending  | `bus.useUidAscendingAllocation()`         | Node IDs 1..N in ascending UID order. Deterministic for a fixed set of hardware.             |
-| UID table      | `bus.useUidTableAllocation(table, count)` | Each known UID gets a fixed node ID; unknown devices fall back to the lowest free node IDs.  |
+| Strategy       | Method                                    | Behaviour                                                                                           |
+|----------------|-------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| FIFO (default) | `bus.useFifoAllocation()`                 | Lowest free node IDs in advertise-arrival order. Simple, but not deterministic across power cycles. |
+| UID ascending  | `bus.useUidAscendingAllocation()`         | Lowest free node IDs in ascending UID order. Deterministic for a fixed set of hardware.             |
+| UID table      | `bus.useUidTableAllocation(table, count)` | Each known UID gets a fixed node ID; unknown devices fall back to the lowest free node IDs.         |
+
+All three skip node IDs already held by nodes with a fixed (hardcoded) node ID,
+and never assign to those nodes. A UID table entry mapping to a node ID a fixed
+node already holds is dropped, and that device falls back to the lowest free
+node ID.
 
 The **UID table** is the recommended pattern whenever a sketch addresses a
 device by node ID (all motor control use cases):
@@ -223,8 +236,8 @@ ScalpelBus bus(transport);
 
 ## 6 Limitations
 
-- **One `ScalpelBus` instance per sketch.** The vendored allocator state
-  machine keeps static state; a second bus instance would corrupt it.
+- **One `ScalpelBus` instance per sketch.** The vendored allocator state machine
+  keeps static state, a second bus instance would corrupt it.
 - **Allocator role only, single owner.** The host always assigns node IDs on
   `begin()`; it cannot passively join a bus owned by another allocator, and it
   cannot act as an allocatee (see [4.1 Allocator Role](#41-allocator-role)).

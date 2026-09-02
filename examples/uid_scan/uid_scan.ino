@@ -54,6 +54,12 @@ void setup() {
     Serial.print(node.uid[2], HEX);
     Serial.print(", <node_id> }");
 
+    // Nodes with a fixed (hardcoded) node ID are never reassigned, their node
+    // ID is reserved and left out of the pool the strategy assigns from.
+    if (node.reserved) {
+      Serial.print("  (fixed node ID)");
+    }
+
     ScalpelVersionInfo version;
     if (bus.probeVersion(node.nodeId, version)) {
       Serial.print("  fw v");

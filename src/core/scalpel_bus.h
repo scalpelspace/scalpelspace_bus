@@ -44,8 +44,12 @@ enum ScalpelBusStatus {
 /** @brief One discovered node on the bus. */
 struct ScalpelBusNode {
   uint16_t uid[3]; // 48-bit UID hash, segments [0..15], [16..31], [32..47].
-  uint8_t nodeId;  // Assigned node ID (0 if the bus ran out of IDs).
-  bool acked;      // True once the node ACKed its assignment.
+  uint8_t nodeId;  // Assigned node ID (0 if the bus ran out of IDs, or if a
+                   // fixed node advertised while still unassigned).
+  bool acked;      // True once the node ACKed its assignment. Always false for
+                   // a fixed node: it is never sent an assignment to ACK.
+  bool reserved;   // True when the node advertised a fixed (hardcoded) node ID
+                   // that it refuses to have reassigned.
 };
 
 /**
@@ -92,6 +96,11 @@ public:
    * use useUidTableAllocation() and bind explicitly with
    * ScalpelBusDevice::attach().
    *
+   * Nodes configured with a fixed (hardcoded) node ID keep it: they are
+   * reported by nodeInfo() with ScalpelBusNode::reserved set, their node ID
+   * is taken out of the pool offered to the strategy, and they are never sent
+   * an assignment (so they never ACK).
+   *
    * Nodes must be powered and listening before discovery opens; call
    * rediscover() to re-run allocation if devices boot late.
    *
@@ -108,18 +117,22 @@ public:
   /** Node ID assignment strategy (select before begin()/rediscover()). ******/
 
   /**
-   * @brief Assign node IDs 1..N in discovery (arrival) order. Default.
+   * @brief Assign the lowest free node IDs in discovery (arrival) order.
+   * Default.
    *
    * Simple, but not deterministic across power cycles when several nodes
-   * boot together; fine for single-device buses.
+   * boot together; fine for single-device buses. Node IDs held by fixed
+   * nodes are skipped, and fixed nodes keep the node ID they advertised.
    */
   void useFifoAllocation() { _strategy = can_id_strategy_fifo; }
 
   /**
-   * @brief Assign node IDs 1..N in ascending 48-bit UID order.
+   * @brief Assign the lowest free node IDs in ascending 48-bit UID order.
    *
    * Deterministic for a fixed set of hardware without maintaining a table:
-   * the same devices always end up with the same node IDs.
+   * the same devices always end up with the same node IDs. Node IDs held by
+   * fixed nodes are skipped, and fixed nodes keep the node ID they
+   * advertised.
    */
   void useUidAscendingAllocation() {
     _strategy = can_id_strategy_uid_ascending;
@@ -131,8 +144,10 @@ public:
    *
    * Devices found in @p entries receive their mapped node ID; unknown devices
    * receive the lowest free (unclaimed) node IDs, or stay unassigned (node ID
-   * 0) if none remain. The array is used by reference and must stay alive while
-   * the bus is in use.
+   * 0) if none remain. Node IDs held by fixed nodes count as claimed, so an
+   * entry mapping to one of them is dropped and that device falls back to the
+   * lowest free node ID. The array is used by reference and must stay alive
+   * while the bus is in use.
    *
    * @param entries UID -> node ID mappings (node IDs 1..30, unique).
    * @param count Number of entries.
@@ -194,11 +209,11 @@ private:
   void bindDevicesPositional();
   void pumpRx();
   void dispatchFrame(const ScalpelCanFrame &frame);
-  void handleAllocationFrame(can_message_id_t messageId,
+  void handleAllocationFrame(can_message_id_t messageId, can_node_id_t nodeId,
                              const ScalpelCanFrame &frame);
   void onAllocationAssigned(const uint16_t *uids0, const uint16_t *uids1,
-                            const uint16_t *uids2,
-                            const can_node_id_t *nodeIds, uint8_t nodeCount);
+                            const uint16_t *uids2, const can_node_id_t *nodeIds,
+                            uint8_t nodeCount);
 
   // Trampolines into the single active instance; the can_driver allocator
   // takes plain function pointers without a context argument.

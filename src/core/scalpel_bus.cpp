@@ -142,20 +142,49 @@ bool ScalpelBus::runAllocation(const uint16_t discoveryWindowMs,
 }
 
 void ScalpelBus::computeNodeIdsFromStrategy() {
-  // Strategies are pure functions of the discovered UID set (plus the UID
+  // Strategies are pure functions of the discovery context (plus the UID
   // table configured via useUidTableAllocation()), so running the same
   // strategy on the shadow copy reproduces the allocator's assignment.
   uint16_t uids0[CAN_ID_MAX_NODES] = {0};
   uint16_t uids1[CAN_ID_MAX_NODES] = {0};
   uint16_t uids2[CAN_ID_MAX_NODES] = {0};
+  bool reserved[CAN_ID_MAX_NODES] = {false};
   can_node_id_t nodeIds[CAN_ID_MAX_NODES] = {0};
+  uint32_t reservedMask = 0;
+
   for (uint8_t i = 0; i < _nodeCount; i++) {
     uids0[i] = _nodes[i].uid[0];
     uids1[i] = _nodes[i].uid[1];
     uids2[i] = _nodes[i].uid[2];
+    reserved[i] = _nodes[i].reserved;
+    // Mirrors the allocator: a fixed node holding a valid node ID takes it out
+    // of the assignable pool. One that advertised while still unassigned has
+    // no ID to reserve (misconfigured node) and is simply skipped.
+    if (_nodes[i].reserved && _nodes[i].nodeId != CAN_ID_NODE_ID_UNASSIGNED) {
+      reservedMask |= (uint32_t)(1UL << _nodes[i].nodeId);
+    }
   }
-  _strategy(uids0, uids1, uids2, _nodeCount, nodeIds);
+
+  node_id_assignment_ctx_t ctx;
+  ctx.uids_0 = uids0;
+  ctx.uids_1 = uids1;
+  ctx.uids_2 = uids2;
+  ctx.reserved = reserved;
+  ctx.node_count = _nodeCount;
+  ctx.reserved_mask = reservedMask;
+
+  _strategy(&ctx, nodeIds);
+
   for (uint8_t i = 0; i < _nodeCount; i++) {
+    if (_nodes[i].reserved) {
+      continue; // Keeps the node ID it advertised; never sent an assignment.
+    }
+    // Mirror the allocator's defensive drop of assignments outside the
+    // assignable range or colliding with a node ID a fixed node already holds.
+    if (nodeIds[i] > CAN_ID_MAX_NODES ||
+        (reservedMask & (uint32_t)(1UL << nodeIds[i]))) {
+      nodeIds[i] = CAN_ID_NODE_ID_UNASSIGNED;
+    }
     _nodes[i].nodeId = nodeIds[i];
   }
 }
@@ -198,7 +227,7 @@ void ScalpelBus::dispatchFrame(const ScalpelCanFrame &frame) {
   }
 
   if (messageId >= (can_message_id_t)CAN_MSG_ENUM_DISCOVER) {
-    handleAllocationFrame(messageId, frame);
+    handleAllocationFrame(messageId, nodeId, frame);
     return;
   }
 
@@ -217,6 +246,7 @@ void ScalpelBus::dispatchFrame(const ScalpelCanFrame &frame) {
 }
 
 void ScalpelBus::handleAllocationFrame(const can_message_id_t messageId,
+                                       const can_node_id_t nodeId,
                                        const ScalpelCanFrame &frame) {
   can_header_t header;
   header.standard_id = frame.id;
@@ -230,16 +260,23 @@ void ScalpelBus::handleAllocationFrame(const can_message_id_t messageId,
     can_rx_can_id_allocator_advertise(&header, frame.data);
     // Shadow record of the advertised UID so nodes can be inspected even if
     // allocation later stalls; overwritten by the authoritative completion
-    // callback on success. Mirrors the allocator's accept window (advertises
-    // after discovery closes are ignored there too) and its duplicate ADVERTISE
-    // rejection.
-    if (_discoveryOpen && frame.dlc == 8 && _nodeCount < CAN_ID_MAX_NODES) {
+    // callback on success. Mirrors the allocator's accept rules: the accept
+    // window (advertises after discovery closes are ignored there too),
+    // duplicate ADVERTISE rejection, and rejection of a broadcast sender. The
+    // advertising node carries the node ID it currently holds in the CAN ID
+    // (0 when it has never been assigned).
+    if (_discoveryOpen && frame.dlc == 8 && _nodeCount < CAN_ID_MAX_NODES &&
+        nodeId != CAN_ID_NODE_ID_BROADCAST) {
       const uint16_t uid0 =
           (uint16_t)(frame.data[0] | ((uint16_t)frame.data[1] << 8));
       const uint16_t uid1 =
           (uint16_t)(frame.data[2] | ((uint16_t)frame.data[3] << 8));
       const uint16_t uid2 =
           (uint16_t)(frame.data[4] | ((uint16_t)frame.data[5] << 8));
+      // alloc_mode owns byte 7; only bit 0 is defined, the reserved bits are
+      // masked off so a future flag does not read as a refusal.
+      const bool notReassignable = ((frame.data[7] & CAN_ALLOC_MODE_MASK) ==
+                                    (uint8_t)CAN_ALLOC_MODE_NOT_REASSIGNABLE);
       bool duplicate = false;
       for (uint8_t i = 0; i < _nodeCount; i++) {
         if (_nodes[i].uid[0] == uid0 && _nodes[i].uid[1] == uid1 &&
@@ -253,9 +290,11 @@ void ScalpelBus::handleAllocationFrame(const can_message_id_t messageId,
         node.uid[0] = uid0;
         node.uid[1] = uid1;
         node.uid[2] = uid2;
-        // Node ID is provisional until computeNodeIdsFromStrategy() runs when
+        node.reserved = notReassignable;
+        // A fixed node keeps the node ID it advertised. For everyone else the
+        // node ID is provisional until computeNodeIdsFromStrategy() runs when
         // the discovery window closes.
-        node.nodeId = CAN_ID_NODE_ID_UNASSIGNED;
+        node.nodeId = notReassignable ? nodeId : CAN_ID_NODE_ID_UNASSIGNED;
         node.acked = false;
         _nodeCount++;
       }
@@ -264,9 +303,10 @@ void ScalpelBus::handleAllocationFrame(const can_message_id_t messageId,
   }
   case (can_message_id_t)CAN_MSG_ENUM_ACK: {
     can_rx_can_id_allocator_ack(&header, frame.data);
-    const can_node_id_t ackedNodeId = (can_node_id_t)(frame.id & 0x1Fu);
     for (uint8_t i = 0; i < _nodeCount; i++) {
-      if (_nodes[i].nodeId == ackedNodeId) {
+      // Fixed nodes are never sent an assignment, so an ACK carrying one of
+      // their node IDs is not theirs to claim (the allocator drops it too).
+      if (!_nodes[i].reserved && _nodes[i].nodeId == nodeId) {
         _nodes[i].acked = true;
         break;
       }
@@ -290,14 +330,37 @@ void ScalpelBus::onAllocationAssigned(const uint16_t *uids0,
                                       const uint8_t nodeCount) {
   // Authoritative result: all arrays are indexed by discovery order and nodeIds
   // carries the ACKed node ID per entry (0 = not assigned, e.g. the strategy
-  // ran out of free node IDs).
-  _nodeCount = (nodeCount <= CAN_ID_MAX_NODES) ? nodeCount : CAN_ID_MAX_NODES;
+  // ran out of free node IDs). A fixed node never ACKs, its entry holds the
+  // node ID it advertised.
+  const uint8_t count =
+      (nodeCount <= CAN_ID_MAX_NODES) ? nodeCount : CAN_ID_MAX_NODES;
+
+  // The callback does not carry alloc_mode, so recover it from the shadow
+  // table by UID before overwriting that table. Matching by UID rather than by
+  // index keeps this correct even if the shadow drifted from the allocator's
+  // discovery order (e.g. a frame only one of them rejected).
+  uint32_t reservedBits = 0;
+  for (uint8_t i = 0; i < count; i++) {
+    for (uint8_t j = 0; j < _nodeCount; j++) {
+      if (_nodes[j].uid[0] == uids0[i] && _nodes[j].uid[1] == uids1[i] &&
+          _nodes[j].uid[2] == uids2[i]) {
+        if (_nodes[j].reserved) {
+          reservedBits |= (uint32_t)(1UL << i);
+        }
+        break;
+      }
+    }
+  }
+
+  _nodeCount = count;
   for (uint8_t i = 0; i < _nodeCount; i++) {
+    const bool reserved = (reservedBits & (uint32_t)(1UL << i)) != 0;
     _nodes[i].uid[0] = uids0[i];
     _nodes[i].uid[1] = uids1[i];
     _nodes[i].uid[2] = uids2[i];
     _nodes[i].nodeId = nodeIds[i];
-    _nodes[i].acked = nodeIds[i] != CAN_ID_NODE_ID_UNASSIGNED;
+    _nodes[i].reserved = reserved;
+    _nodes[i].acked = !reserved && (nodeIds[i] != CAN_ID_NODE_ID_UNASSIGNED);
   }
   _allocationComplete = true;
 }
