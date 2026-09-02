@@ -1,7 +1,7 @@
 /*******************************************************************************
  * VENDORED FILE - DO NOT EDIT.
  * Source: https://github.com/scalpelspace/mc_stepper_driver
- * Version: c953fbb (ref: v0.2.2)
+ * Version: 6cb341f (ref: v0.3.0)
  * Synced by CI tooling.
  *******************************************************************************
  */

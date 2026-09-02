@@ -1,7 +1,7 @@
 /*******************************************************************************
  * VENDORED FILE - DO NOT EDIT.
  * Source: https://github.com/scalpelspace/can_driver
- * Version: 972bdec (ref: v0.5.0)
+ * Version: 2287e60 (ref: v0.6.0)
  * Synced by CI tooling.
  *******************************************************************************
  */
@@ -44,6 +44,9 @@ extern "C" {
 #define CAN_ID_NODE_ID_UNASSIGNED (0u)
 #define CAN_ID_NODE_ID_BROADCAST (31u)
 
+// Defined bits of the ADVERTISE `alloc_mode` field (bits 1..7 reserved).
+#define CAN_ALLOC_MODE_MASK (0x01u)
+
 /** Public types. *************************************************************/
 
 typedef uint8_t can_message_id_t; // Range: 0..63.
@@ -59,8 +62,9 @@ typedef enum {
   // CAN ID: [CAN_MSG_ENUM_DISCOVER][CAN_ID_NODE_ID_BROADCAST].
   //         0b011100011111, 0x71F, 1823.
   CAN_MSG_ENUM_ADVERTISE = 57, // Nodes report their own UID hash.
-  // CAN ID: [CAN_MSG_ENUM_ADVERTISE][CAN_ID_NODE_ID_UNASSIGNED].
-  //         0b011100100000, 0x720, 1824.
+  // CAN ID: [CAN_MSG_ENUM_ADVERTISE][node_id=<current>].
+  //         0b0111001xxxxx, 0x720..0x73F, 1824..1855.
+  // Unassigned nodes advertise with CAN_ID_NODE_ID_UNASSIGNED (0x720).
   CAN_MSG_ENUM_ASSIGN = 58, // Allocator assigns each UID a Node ID.
   // CAN ID: [CAN_MSG_ENUM_ASSIGN][CAN_ID_NODE_ID_BROADCAST].
   //         0b011101011111, 0x75F, 1887.
@@ -70,6 +74,20 @@ typedef enum {
 
   // 60..63 reserved for future.
 } can_message_id_enum_t;
+
+/**
+ * @brief ADVERTISE `alloc_mode` field values.
+ *
+ * Occupies the full byte 7 of the ADVERTISE payload. Only bit 0 is defined,
+ * bits 1..7 are reserved and must be transmitted as 0.
+ *
+ * Value 0 is "reassignable" so that legacy firmware, which transmitted byte 7
+ * as a zeroed reserved field, decodes as a normal reassignable node.
+ */
+typedef enum {
+  CAN_ALLOC_MODE_REASSIGNABLE = 0,     // Accepts allocator assignment.
+  CAN_ALLOC_MODE_NOT_REASSIGNABLE = 1, // Holds a fixed (hardcoded) Node ID.
+} can_alloc_mode_t;
 
 /** Public functions. *********************************************************/
 

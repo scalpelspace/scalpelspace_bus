@@ -1,7 +1,7 @@
 /*******************************************************************************
  * VENDORED FILE - DO NOT EDIT.
  * Source: https://github.com/scalpelspace/can_driver
- * Version: 972bdec (ref: v0.5.0)
+ * Version: 2287e60 (ref: v0.6.0)
  * Synced by CI tooling.
  *******************************************************************************
  */
@@ -35,13 +35,13 @@ typedef enum {
 /** Private variables. ********************************************************/
 
 // CAN ID allocatee configuration.
-static allocatee_config_t config = {NULL, NULL};
+static allocatee_config_t config = {0};
 
 // State machine variable for allocatee.
 static allocatee_state_t allocatee_state = ALLOCATEE_IDLE;
 
 static uint8_t session_id = 0; // Expected session ID.
-static uint8_t node_id = 0;    // Assigned node ID.
+static uint8_t node_id = 0;    // Currently held node ID (0 = unassigned).
 
 /** Public functions. *********************************************************/
 
@@ -49,8 +49,23 @@ bool can_id_allocatee_start(const allocatee_config_t allocatee) {
   if (allocatee.can_tx_func == NULL || allocatee.get_uid_hash48_func == NULL)
     return false; // Transmit and UID functions are required for the protocol.
 
-  config = allocatee; // Update configuration.
-  node_id = 0;
+  // Reserved alloc_mode bits must be transmittable as 0.
+  if (allocatee.alloc_mode != CAN_ALLOC_MODE_REASSIGNABLE &&
+      allocatee.alloc_mode != CAN_ALLOC_MODE_NOT_REASSIGNABLE)
+    return false;
+
+  // Reject reserved (31 = broadcast) and out of range starting Node IDs.
+  if (allocatee.node_id > CAN_ID_MAX_NODES)
+    return false;
+
+  // A node that refuses reassignment must be told which Node ID it holds,
+  // otherwise it has no ID to advertise and none to keep.
+  if (allocatee.alloc_mode == CAN_ALLOC_MODE_NOT_REASSIGNABLE &&
+      allocatee.node_id == CAN_ID_NODE_ID_UNASSIGNED)
+    return false;
+
+  config = allocatee;          // Update configuration.
+  node_id = allocatee.node_id; // Hardcoded or previously held Node ID.
   session_id = 0;
   allocatee_state = ALLOCATEE_AWAIT_DISCOVERY;
   return true;
@@ -86,6 +101,11 @@ void can_rx_can_id_allocatee_assignment(const can_header_t *header,
   if (!header || !data)
     return;
   if (allocatee_state != ALLOCATEE_AWAIT_ASSIGNMENT)
+    return;
+
+  // A fixed node keeps its Node ID even if a misbehaving allocator sends an
+  // ASSIGN for it (defensive, it never enters ALLOCATEE_AWAIT_ASSIGNMENT).
+  if (config.alloc_mode == CAN_ALLOC_MODE_NOT_REASSIGNABLE)
     return;
 
   // Ensure CAN header consistency.
@@ -146,17 +166,35 @@ void can_id_allocatee_state_machine(void) {
     // Calculate UID.
     config.get_uid_hash48_func(&uid_0, &uid_1, &uid_2);
 
+    // ADVERTISE CAN ID encodes the Node ID currently held (0 = unassigned),
+    // so the allocator sees which IDs are already taken on the bus.
+    can_id_t advertise_id = 0u;
+    if (!can_id_pack(CAN_MSG_ENUM_ADVERTISE, node_id, &advertise_id)) {
+      // Unreachable: node_id is range-validated on start and on assignment.
+      // Reset rather than transmit a malformed ADVERTISE.
+      allocatee_state = ALLOCATEE_IDLE;
+      break;
+    }
+
     // Pack signals and send.
+    // Use ADVERTISE as a signal-definition template, patch the message ID.
     msg = allocation_dbc[CAN_ID_ALLOCATION_DBC_IDX_NODE_ID_ADVERTISE];
+    msg.message_id = (uint32_t)advertise_id;
     pack_signal_raw32(&msg.signals[0], tx_data, uid_0);
     pack_signal_raw32(&msg.signals[1], tx_data, uid_1);
     pack_signal_raw32(&msg.signals[2], tx_data, uid_2);
     pack_signal_raw32(&msg.signals[3], tx_data, session_id);
-    pack_signal_raw32(&msg.signals[4], tx_data, 0u);
+    // alloc_mode owns all of byte 7. Mask to the defined bit so the reserved
+    // bits always transmit as 0, a stray 1 would decode as a future flag.
+    pack_signal_raw32(&msg.signals[4], tx_data,
+                      (uint32_t)config.alloc_mode & CAN_ALLOC_MODE_MASK);
     config.can_tx_func(&msg, tx_data);
 
-    // State transition.
-    allocatee_state = ALLOCATEE_AWAIT_ASSIGNMENT;
+    // State transition. A node that refuses reassignment receives no ASSIGN,
+    // its part in the session ends with the advertisement.
+    allocatee_state = (config.alloc_mode == CAN_ALLOC_MODE_NOT_REASSIGNABLE)
+                          ? ALLOCATEE_AWAIT_DISCOVERY
+                          : ALLOCATEE_AWAIT_ASSIGNMENT;
     break;
 
   case ALLOCATEE_AWAIT_ASSIGNMENT:
@@ -193,8 +231,9 @@ void can_id_allocatee_state_machine(void) {
     pack_signal_raw32(&msg.signals[5], tx_data, 0u);
     config.can_tx_func(&msg, tx_data);
 
-    // State transition.
-    allocatee_state = ALLOCATEE_IDLE;
+    // State transition. Return to awaiting discovery (rather than idle) so the
+    // node keeps answering DISCOVER now that it holds a Node ID.
+    allocatee_state = ALLOCATEE_AWAIT_DISCOVERY;
 
     // Call assignment complete callback (optional).
     if (config.allocatee_assigned_func) {

@@ -1,7 +1,7 @@
 /*******************************************************************************
  * VENDORED FILE - DO NOT EDIT.
  * Source: https://github.com/scalpelspace/momentum_driver
- * Version: 5415d3b (ref: v0.4.2)
+ * Version: a9b0c61 (ref: v0.5.0)
  * Synced by CI tooling.
  *******************************************************************************
  */
