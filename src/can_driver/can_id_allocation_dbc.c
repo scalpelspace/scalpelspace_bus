@@ -1,7 +1,7 @@
 /*******************************************************************************
  * VENDORED FILE - DO NOT EDIT.
  * Source: https://github.com/scalpelspace/can_driver
- * Version: 972bdec (ref: v0.5.0)
+ * Version: 2287e60 (ref: v0.6.0)
  * Synced by CI tooling.
  *******************************************************************************
  */
@@ -88,7 +88,7 @@ static const can_signal_t node_id_advertise_signals[5] = {
         .mux_value = 0,
     },
     {
-        .name = "RESERVED_ADVERTISE",
+        .name = "alloc_mode",
         .start_bit = 56,
         .bit_length = 8,
         .byte_order = CAN_LITTLE_ENDIAN,

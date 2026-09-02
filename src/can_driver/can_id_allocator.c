@@ -1,7 +1,7 @@
 /*******************************************************************************
  * VENDORED FILE - DO NOT EDIT.
  * Source: https://github.com/scalpelspace/can_driver
- * Version: 972bdec (ref: v0.5.0)
+ * Version: 2287e60 (ref: v0.6.0)
  * Synced by CI tooling.
  *******************************************************************************
  */
@@ -53,10 +53,18 @@ static uint16_t discovered_uids_1[CAN_ID_MAX_NODES] = {0};
 static uint16_t discovered_uids_2[CAN_ID_MAX_NODES] = {0};
 // Assigning Node ID value (awaiting ACK).
 static can_node_id_t assigning_node_ids[CAN_ID_MAX_NODES] = {0};
+// Nodes that advertised CAN_ALLOC_MODE_NOT_REASSIGNABLE, they keep their own
+// Node ID and are never sent an ASSIGN.
+static bool discovered_reserved[CAN_ID_MAX_NODES] = {false};
 
 // ACKed Node IDs, index-aligned with the discovered UID arrays.
 // 0 (CAN_ID_NODE_ID_UNASSIGNED) = node has not ACKed.
+// Reserved nodes never ACK, their entry holds the Node ID they advertised.
 static can_node_id_t acked_node_ids[CAN_ID_MAX_NODES] = {0};
+
+// Bitmap of Node IDs held by reserved nodes, bit N set = Node ID N is in use
+// and unavailable for assignment. Bits 0 and 31 are never set.
+static uint32_t reserved_node_ids = 0;
 
 // UID table strategy state.
 static const can_id_uid_table_entry_t *uid_table_entries = NULL;
@@ -83,6 +91,24 @@ static int16_t search_received_uids(const uint16_t uid_0, const uint16_t uid_1,
 }
 
 /**
+ * @brief Advance a Node ID cursor past the IDs held by reserved nodes.
+ *
+ * @param next_free Cursor to advance, in [1 .. CAN_ID_MAX_NODES + 1].
+ * @param reserved_mask Bitmap of Node IDs held by reserved nodes.
+ *
+ * @return The lowest free Node ID at or above next_free, or
+ *         CAN_ID_MAX_NODES + 1 when the assignable range is exhausted.
+ */
+static can_node_id_t next_free_node_id(can_node_id_t next_free,
+                                       const uint32_t reserved_mask) {
+  while (next_free <= CAN_ID_MAX_NODES &&
+         (reserved_mask & (uint32_t)(1u << next_free))) {
+    next_free++;
+  }
+  return next_free;
+}
+
+/**
  * @brief Invoke the configured assignment strategy and store results.
  *
  * Falls back to @ref can_id_strategy_fifo when no strategy is configured.
@@ -91,8 +117,20 @@ static void node_id_strategy(void) {
   const node_id_assignment_strategy_t strategy =
       config.strategy ? config.strategy : can_id_strategy_fifo;
 
-  strategy(discovered_uids_0, discovered_uids_1, discovered_uids_2,
-           discovered_nodes, assigning_node_ids);
+  const node_id_assignment_ctx_t ctx = {
+      .uids_0 = discovered_uids_0,
+      .uids_1 = discovered_uids_1,
+      .uids_2 = discovered_uids_2,
+      .reserved = discovered_reserved,
+      .node_count = discovered_nodes,
+      .reserved_mask = reserved_node_ids,
+  };
+
+  // Clear stale results so entries a strategy leaves untouched read as
+  // unresolved rather than as an assignment from a previous session.
+  memset(assigning_node_ids, 0, sizeof(assigning_node_ids));
+
+  strategy(&ctx, assigning_node_ids);
 }
 
 /** Public functions. *********************************************************/
@@ -106,6 +144,8 @@ bool can_id_allocator_start(const allocator_config_t allocator) {
   discovered_nodes = 0;
   soft_assigned_nodes = 0;
   assignment_acked_nodes = 0;
+  reserved_node_ids = 0;
+  memset(discovered_reserved, 0, sizeof(discovered_reserved));
   memset(acked_node_ids, 0, sizeof(acked_node_ids));
   return true;
 }
@@ -120,8 +160,8 @@ bool can_id_allocator_end_discovery(void) {
 
 void can_rx_can_id_allocator_advertise(const can_header_t *header,
                                        const uint8_t *data) {
-  const can_message_t msg =
-      allocation_dbc[CAN_ID_ALLOCATION_DBC_IDX_NODE_ID_ADVERTISE];
+  const can_message_t msg = allocation_dbc
+      [CAN_ID_ALLOCATION_DBC_IDX_NODE_ID_ADVERTISE]; // Reference only message.
 
   if (!header || !data)
     return;
@@ -132,15 +172,28 @@ void can_rx_can_id_allocator_advertise(const can_header_t *header,
   if (discovered_nodes >= CAN_ID_MAX_NODES)
     return;
 
-  // Ensure CAN header consistency.
-  if (header->standard_id != msg.message_id || header->dlc != msg.dlc)
+  // Validate message_id and node_id from CAN ID.
+  can_message_id_t rx_msg_id = 0;
+  can_node_id_t rx_node_id_in_can_id = 0;
+  if (!can_id_unpack(header->standard_id, &rx_msg_id, &rx_node_id_in_can_id))
+    return;
+  if (rx_msg_id != (can_message_id_t)CAN_MSG_ENUM_ADVERTISE)
+    return;
+  // Node ID 0 (unassigned) is expected from a node that has never been
+  // assigned. Broadcast is never a valid sender.
+  if (rx_node_id_in_can_id == CAN_ID_NODE_ID_BROADCAST)
     return;
 
-  // Decode fields.
+  // DLC must match.
+  if (header->dlc != msg.dlc)
+    return;
+
+  // Decode fields (using ADVERTISE message[0] signals as decode reference).
   const uint16_t rx_uid_0 = (uint16_t)decode_signal(&msg.signals[0], data);
   const uint16_t rx_uid_1 = (uint16_t)decode_signal(&msg.signals[1], data);
   const uint16_t rx_uid_2 = (uint16_t)decode_signal(&msg.signals[2], data);
   const uint8_t rx_session_id = (uint8_t)decode_signal(&msg.signals[3], data);
+  const uint8_t rx_alloc_mode = (uint8_t)decode_signal(&msg.signals[4], data);
 
   // Session must match.
   if (session_id != rx_session_id)
@@ -154,6 +207,25 @@ void can_rx_can_id_allocator_advertise(const can_header_t *header,
   discovered_uids_0[discovered_nodes] = rx_uid_0;
   discovered_uids_1[discovered_nodes] = rx_uid_1;
   discovered_uids_2[discovered_nodes] = rx_uid_2;
+
+  // Only bit 0 of alloc_mode is defined, ignore the reserved bits so a future
+  // flag does not read as a refusal to be reassigned.
+  const bool rx_not_reassignable = ((rx_alloc_mode & CAN_ALLOC_MODE_MASK) ==
+                                    (uint8_t)CAN_ALLOC_MODE_NOT_REASSIGNABLE);
+  discovered_reserved[discovered_nodes] = rx_not_reassignable;
+
+  if (rx_not_reassignable) {
+    // The node keeps the Node ID it advertised, it is never sent an ASSIGN and
+    // never ACKs, so report that Node ID directly.
+    acked_node_ids[discovered_nodes] = rx_node_id_in_can_id;
+
+    // Take the Node ID out of the assignable pool. A node advertising as not
+    // reassignable while still unassigned has no ID to reserve, it is simply
+    // skipped (misconfiguration, can_id_allocatee_start() rejects it locally).
+    if (rx_node_id_in_can_id != CAN_ID_NODE_ID_UNASSIGNED) {
+      reserved_node_ids |= (uint32_t)(1u << rx_node_id_in_can_id);
+    }
+  }
 
   // Increment index.
   discovered_nodes += 1;
@@ -205,6 +277,11 @@ void can_rx_can_id_allocator_ack(const can_header_t *header,
   if (uid_index < 0)
     return;
 
+  // Reserved nodes are never sent an ASSIGN, so an ACK from one is not
+  // expected and must not be counted against the assigned node total.
+  if (discovered_reserved[uid_index])
+    return;
+
   // Ignore duplicate ACK (e.g. retransmission) from an already ACKed node.
   if (acked_node_ids[uid_index] != CAN_ID_NODE_ID_UNASSIGNED)
     return;
@@ -214,27 +291,39 @@ void can_rx_can_id_allocator_ack(const can_header_t *header,
   assignment_acked_nodes += 1;
 }
 
-void can_id_strategy_fifo(const uint16_t uids_0[CAN_ID_MAX_NODES],
-                          const uint16_t uids_1[CAN_ID_MAX_NODES],
-                          const uint16_t uids_2[CAN_ID_MAX_NODES],
-                          const uint8_t node_count,
+void can_id_strategy_fifo(const node_id_assignment_ctx_t *ctx,
                           can_node_id_t node_ids_out[CAN_ID_MAX_NODES]) {
-  // Suppress unused-parameter warnings; UIDs are not needed for FIFO ordering.
-  (void)uids_0;
-  (void)uids_1;
-  (void)uids_2;
+  if (!ctx)
+    return;
 
-  // Assign Node IDs 1..N in the order nodes were discovered.
-  for (uint8_t i = 0; i < node_count; i++) {
-    node_ids_out[i] = (can_node_id_t)(i + 1u);
+  // Assign the lowest free Node IDs in the order nodes were discovered.
+  can_node_id_t next_free = 1u;
+  for (uint8_t i = 0; i < ctx->node_count; i++) {
+    node_ids_out[i] = CAN_ID_NODE_ID_UNASSIGNED;
+
+    // Reserved nodes keep the Node ID they advertised.
+    if (ctx->reserved && ctx->reserved[i])
+      continue;
+
+    next_free = next_free_node_id(next_free, ctx->reserved_mask);
+    if (next_free > CAN_ID_MAX_NODES)
+      continue; // Bus full, leave the node unresolved.
+
+    node_ids_out[i] = next_free;
+    next_free++;
   }
 }
 
 void can_id_strategy_uid_ascending(
-    const uint16_t uids_0[CAN_ID_MAX_NODES],
-    const uint16_t uids_1[CAN_ID_MAX_NODES],
-    const uint16_t uids_2[CAN_ID_MAX_NODES], const uint8_t node_count,
+    const node_id_assignment_ctx_t *ctx,
     can_node_id_t node_ids_out[CAN_ID_MAX_NODES]) {
+  if (!ctx || !ctx->uids_0 || !ctx->uids_1 || !ctx->uids_2)
+    return;
+
+  const uint16_t *const uids_0 = ctx->uids_0;
+  const uint16_t *const uids_1 = ctx->uids_1;
+  const uint16_t *const uids_2 = ctx->uids_2;
+  const uint8_t node_count = ctx->node_count;
 
   // Build a sortable index array [0..node_count-1].
   uint8_t order[CAN_ID_MAX_NODES];
@@ -283,39 +372,59 @@ void can_id_strategy_uid_ascending(
     order[(uint8_t)(j + 1)] = key;
   }
 
-  // Assign Node IDs 1..N in ascending UID order.
+  // Assign the lowest free Node IDs in ascending UID order.
   // order[0] is the discovery index of the node with the smallest UID.
+  can_node_id_t next_free = 1u;
   for (uint8_t rank = 0; rank < node_count; rank++) {
-    node_ids_out[order[rank]] = (can_node_id_t)(rank + 1u);
+    const uint8_t idx = order[rank];
+    node_ids_out[idx] = CAN_ID_NODE_ID_UNASSIGNED;
+
+    // Reserved nodes keep the Node ID they advertised.
+    if (ctx->reserved && ctx->reserved[idx])
+      continue;
+
+    next_free = next_free_node_id(next_free, ctx->reserved_mask);
+    if (next_free > CAN_ID_MAX_NODES)
+      continue; // Bus full, leave the node unresolved.
+
+    node_ids_out[idx] = next_free;
+    next_free++;
   }
 }
 
-void can_id_strategy_uid_table(const uint16_t uids_0[CAN_ID_MAX_NODES],
-                               const uint16_t uids_1[CAN_ID_MAX_NODES],
-                               const uint16_t uids_2[CAN_ID_MAX_NODES],
-                               const uint8_t node_count,
+void can_id_strategy_uid_table(const node_id_assignment_ctx_t *ctx,
                                can_node_id_t node_ids_out[CAN_ID_MAX_NODES]) {
+  if (!ctx || !ctx->uids_0 || !ctx->uids_1 || !ctx->uids_2)
+    return;
 
-  // Bitmap of Node IDs already claimed (bits 1..30).
-  uint32_t claimed = 0u;
+  const uint8_t node_count = ctx->node_count;
+
+  // Bitmap of Node IDs already claimed (bits 1..30). Node IDs held by reserved
+  // nodes start out claimed, they are not available to hand out.
+  uint32_t claimed = ctx->reserved_mask;
 
   // Pass 1: assign table-mapped nodes and mark their Node IDs as claimed.
   for (uint8_t i = 0; i < node_count; i++) {
     node_ids_out[i] = 0u; // Mark as unresolved.
 
+    // Reserved nodes keep the Node ID they advertised.
+    if (ctx->reserved && ctx->reserved[i])
+      continue;
+
     if (!uid_table_entries)
       continue;
 
     for (uint8_t t = 0; t < uid_table_count; t++) {
-      if (uid_table_entries[t].uid_0 == uids_0[i] &&
-          uid_table_entries[t].uid_1 == uids_1[i] &&
-          uid_table_entries[t].uid_2 == uids_2[i]) {
+      if (uid_table_entries[t].uid_0 == ctx->uids_0[i] &&
+          uid_table_entries[t].uid_1 == ctx->uids_1[i] &&
+          uid_table_entries[t].uid_2 == ctx->uids_2[i]) {
         const can_node_id_t mapped = uid_table_entries[t].node_id;
 
         // Only accept valid, unclaimed Node IDs.
-        if (mapped >= 1u && mapped <= 30u && !(claimed & (1u << mapped))) {
+        if (mapped >= 1u && mapped <= CAN_ID_MAX_NODES &&
+            !(claimed & (uint32_t)(1u << mapped))) {
           node_ids_out[i] = mapped;
-          claimed |= (1u << mapped);
+          claimed |= (uint32_t)(1u << mapped);
         }
         break;
       }
@@ -327,15 +436,15 @@ void can_id_strategy_uid_table(const uint16_t uids_0[CAN_ID_MAX_NODES],
   for (uint8_t i = 0; i < node_count; i++) {
     if (node_ids_out[i] != 0u)
       continue; // Already assigned.
+    if (ctx->reserved && ctx->reserved[i])
+      continue; // Reserved node, never assigned.
 
     // Advance next_free past any claimed slots.
-    while (next_free <= 30u && (claimed & (1u << next_free))) {
-      next_free++;
-    }
+    next_free = next_free_node_id(next_free, claimed);
 
-    if (next_free <= 30u) {
+    if (next_free <= CAN_ID_MAX_NODES) {
       node_ids_out[i] = next_free;
-      claimed |= (1u << next_free);
+      claimed |= (uint32_t)(1u << next_free);
       next_free++;
     }
     // If next_free > 30 the bus is full; node_ids_out[i] stays 0 (unassigned).
@@ -386,9 +495,25 @@ void can_id_allocator_state_machine(void) {
 
     // Transmit the assignment with each related UID.
     for (uint8_t i = 0; i < discovered_nodes; i++) {
+      // Skip nodes that refuse reassignment, they keep their own Node ID.
+      if (discovered_reserved[i]) {
+        assigning_node_ids[i] = CAN_ID_NODE_ID_UNASSIGNED;
+        continue;
+      }
+
       // Skip nodes the strategy could not resolve (no free Node ID).
       if (assigning_node_ids[i] == CAN_ID_NODE_ID_UNASSIGNED)
         continue;
+
+      // Drop assignments outside the assignable range (1..30) and any that
+      // collide with a Node ID already held by a node that refuses
+      // reassignment (defensive against a custom strategy that ignores
+      // node_id_assignment_ctx_t::reserved_mask).
+      if (assigning_node_ids[i] > CAN_ID_MAX_NODES ||
+          (reserved_node_ids & (uint32_t)(1u << assigning_node_ids[i]))) {
+        assigning_node_ids[i] = CAN_ID_NODE_ID_UNASSIGNED;
+        continue;
+      }
 
       // Pack signals and send.
       msg = allocation_dbc[CAN_ID_ALLOCATION_DBC_IDX_NODE_ID_ASSIGN];

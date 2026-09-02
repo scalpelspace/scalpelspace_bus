@@ -1,7 +1,7 @@
 /*******************************************************************************
  * VENDORED FILE - DO NOT EDIT.
  * Source: https://github.com/scalpelspace/can_driver
- * Version: 972bdec (ref: v0.5.0)
+ * Version: 2287e60 (ref: v0.6.0)
  * Synced by CI tooling.
  *******************************************************************************
  */
